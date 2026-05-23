@@ -1,50 +1,88 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const Login = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const { login } = useAuth();
-  const navigate = useNavigate();
+function Login() {
 
-  const handleSubmit = async (e) => {
+  const navigate = useNavigate();
+  const { login } = useAuth();
+
+  const [formData, setFormData] = useState({
+    email: '',
+    password: ''
+  });
+
+  const [message, setMessage] = useState('');
+
+  const handleChange = (e) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value
+    });
+  };
+
+  const submitHandler = async (e) => {
     e.preventDefault();
+
     try {
-      await login(email, password);
+
+      await login(formData.email, formData.password);
+
       navigate('/');
-    } catch (err) {
-      setError(err.response?.data?.message || 'Login failed');
+
+    } catch (error) {
+
+      setMessage(
+        error?.response?.data?.message || 'Unable to login'
+      );
+
     }
   };
 
   return (
     <div className="container">
-      <form onSubmit={handleSubmit}>
+
+      <form onSubmit={submitHandler}>
+
         <h2>Login</h2>
-        {error && <p className="error">{error}</p>}
+
+        {message && (
+          <p className="error">{message}</p>
+        )}
+
         <input
           type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          name="email"
+          placeholder="Enter Email"
+          value={formData.email}
+          onChange={handleChange}
           required
         />
+
         <input
           type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          name="password"
+          placeholder="Enter Password"
+          value={formData.password}
+          onChange={handleChange}
           required
         />
-        <button type="submit">Login</button>
+
+        <button type="submit">
+          Sign In
+        </button>
+
         <p>
-          Don't have an account? <Link to="/register">Register</Link>
+          Create new account?{' '}
+          <Link to="/register">
+            Register
+          </Link>
         </p>
+
       </form>
+
     </div>
   );
-};
+}
 
 export default Login;

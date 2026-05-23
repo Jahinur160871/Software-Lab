@@ -4,6 +4,8 @@ const categorySchema = new mongoose.Schema({
   name: { type: String, required: true, unique: true, trim: true },
   slug: { type: String, required: true, unique: true, lowercase: true },
   icon: { type: String, default: '📦' },
+  parentCategory: { type: String, default: null },
+  subcategories: [{ type: String }],
   createdAt: { type: Date, default: Date.now }
 });
 

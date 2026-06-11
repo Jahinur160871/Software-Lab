@@ -6,13 +6,14 @@ import ChatBox from '../components/common/ChatBox';
 import MessageNotification from '../components/common/MessageNotification';
 import { useAuth } from '../context/AuthContext';
 
-const MyOrders = () => {
+const SellerOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
-  const [expandedOrder, setExpandedOrder] = useState(null);
   const [chatOrder, setChatOrder] = useState(null);
   const [unreadMessages, setUnreadMessages] = useState({});
+  const [expandedOrder, setExpandedOrder] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
   const { user } = useAuth();
 
   useEffect(() => {
@@ -24,11 +25,10 @@ const MyOrders = () => {
 
   const fetchOrders = async () => {
     try {
-      const response = await api.get('/orders/my-orders');
-      console.log('Orders fetched:', response.data);
+      const response = await api.get('/orders/seller-orders');
       setOrders(response.data);
     } catch (error) {
-      console.error('Error fetching orders:', error);
+      console.error('Error fetching seller orders:', error);
     } finally {
       setLoading(false);
     }
@@ -63,11 +63,9 @@ const MyOrders = () => {
     return `TK. ${(price || 0).toLocaleString()}`;
   };
 
-  const getSellerIdFromOrder = (order) => {
-    if (order.products && order.products.length > 0 && order.products[0].sellerId) {
-      return order.products[0].sellerId._id || order.products[0].sellerId;
-    }
-    return null;
+  const getBuyerIdFromOrder = (order) => {
+    if (order.buyerId && order.buyerId._id) return order.buyerId._id;
+    return order.buyerId;
   };
 
   const handleChatOpen = (order) => {
@@ -89,8 +87,17 @@ const MyOrders = () => {
   };
 
   const filteredOrders = orders.filter(order => {
-    if (filter === 'all') return true;
-    return order.status === filter;
+    if (filter !== 'all' && order.status !== filter) return false;
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      const orderIdMatch = order._id.toLowerCase().includes(searchLower);
+      const customerMatch = order.buyerId?.name?.toLowerCase().includes(searchLower);
+      const productMatch = order.products.some(p => 
+        p.productId?.title?.toLowerCase().includes(searchLower)
+      );
+      if (!orderIdMatch && !customerMatch && !productMatch) return false;
+    }
+    return true;
   });
 
   const stats = {
@@ -101,6 +108,9 @@ const MyOrders = () => {
     delivering: orders.filter(o => o.status === 'delivering').length,
     delivered: orders.filter(o => o.status === 'delivered').length,
     cancelled: orders.filter(o => o.status === 'cancelled').length,
+    revenue: orders
+      .filter(o => o.status === 'delivered')
+      .reduce((sum, o) => sum + (o.totalAmount || 0), 0)
   };
 
   if (loading) {
@@ -123,20 +133,18 @@ const MyOrders = () => {
         {/* Header */}
         <div style={styles.header}>
           <div>
-            <h1 style={styles.pageTitle}>My Orders</h1>
-            <p style={styles.pageSubtitle}>Track and manage all your purchases</p>
+            <h1 style={styles.pageTitle}>Order Management</h1>
+            <p style={styles.pageSubtitle}>Manage and track all your customer orders</p>
           </div>
           <div style={styles.headerStats}>
+            <div style={styles.statChip}>
+              <strong>{formatPrice(stats.revenue)}</strong>
+              <span>Total Revenue</span>
+            </div>
             <div style={styles.statChip}>
               <strong>{stats.total}</strong>
               <span>Total Orders</span>
             </div>
-            {stats.delivered > 0 && (
-              <div style={styles.statChip}>
-                <strong>{stats.delivered}</strong>
-                <span>Delivered</span>
-              </div>
-            )}
           </div>
         </div>
 
@@ -168,7 +176,7 @@ const MyOrders = () => {
           </div>
         </div>
 
-        {/* Filters */}
+        {/* Filters and Search */}
         <div style={styles.filterBar}>
           <div style={styles.filterTabs}>
             {['all', 'pending', 'confirmed', 'preparing', 'delivering', 'delivered', 'cancelled'].map(status => (
@@ -187,38 +195,102 @@ const MyOrders = () => {
               </button>
             ))}
           </div>
+          
+          <div style={styles.searchWrapper}>
+            <input
+              type="text"
+              placeholder="Search by order ID, customer, or product..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={styles.searchInput}
+            />
+            {searchTerm && (
+              <button onClick={() => setSearchTerm('')} style={styles.clearSearch}>
+                ×
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Orders List */}
+        {/* Orders Table */}
         {filteredOrders.length === 0 ? (
           <div style={styles.emptyState}>
             <div style={styles.emptyIcon}>📋</div>
             <h3>No Orders Found</h3>
-            <p>You haven't placed any orders yet</p>
-            <button onClick={() => window.location.href = '/'} style={styles.shopBtn}>
-              Start Shopping
-            </button>
+            <p>{searchTerm ? `No orders matching "${searchTerm}"` : 'When customers order your products, they\'ll appear here'}</p>
           </div>
         ) : (
-          <div style={styles.ordersList}>
+          <div style={styles.ordersTable}>
+            {/* Table Header */}
+            <div style={styles.tableHeader}>
+              <div style={styles.headerOrder}>Order ID</div>
+              <div style={styles.headerCustomer}>Customer</div>
+              <div style={styles.headerItems}>Items</div>
+              <div style={styles.headerTotal}>Amount</div>
+              <div style={styles.headerStatus}>Status</div>
+              <div style={styles.headerDate}>Date</div>
+              <div style={styles.headerActions}></div>
+            </div>
+
+            {/* Table Rows */}
             {filteredOrders.map((order) => {
               const statusStyle = getStatusStyle(order.status);
-              const sellerId = getSellerIdFromOrder(order);
+              const buyerId = getBuyerIdFromOrder(order);
               const unreadCount = unreadMessages[order._id] || 0;
               const isExpanded = expandedOrder === order._id;
+              
               const firstProduct = order.products[0];
               const productCount = order.products.length;
               const moreItems = productCount - 1;
               
-              // Get size for first product (if exists)
-              const firstProductSize = firstProduct?.size && firstProduct.size !== 'null' ? firstProduct.size : null;
-              
               return (
-                <div key={order._id} style={styles.orderCard}>
-                  {/* Order Header */}
-                  <div style={styles.orderHeader}>
-                    <div style={styles.orderInfo}>
+                <React.Fragment key={order._id}>
+                  <div 
+                    style={styles.tableRow}
+                    onClick={() => toggleExpand(order._id)}
+                  >
+                    <div style={styles.rowOrder}>
                       <span style={styles.orderId}>#{order._id.slice(-8)}</span>
+                    </div>
+                    
+                    <div style={styles.rowCustomer}>
+                      <div style={styles.customerAvatar}>
+                        {order.buyerId?.name?.charAt(0)?.toUpperCase() || 'U'}
+                      </div>
+                      <div style={styles.customerInfo}>
+                        <div style={styles.customerName}>{order.buyerId?.name || 'Unknown'}</div>
+                        <div style={styles.customerContact}>{order.contactNumber}</div>
+                      </div>
+                    </div>
+                    
+                    <div style={styles.rowItems}>
+                      <div style={styles.itemsPreview}>
+                        {firstProduct?.productId?.images?.[0] ? (
+                          <img 
+                            src={firstProduct.productId.images[0]} 
+                            alt="" 
+                            style={styles.itemThumb}
+                          />
+                        ) : (
+                          <div style={styles.itemThumbPlaceholder}>📦</div>
+                        )}
+                        <div style={styles.itemInfo}>
+                          <div style={styles.itemTitle}>
+                            {firstProduct?.productId?.title?.slice(0, 35)}
+                            {firstProduct?.productId?.title?.length > 35 && '...'}
+                          </div>
+                          {moreItems > 0 && (
+                            <div style={styles.moreItems}>+{moreItems} more</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div style={styles.rowTotal}>
+                      <span style={styles.totalAmount}>{formatPrice(order.totalAmount)}</span>
+                    </div>
+                    
+                    <div style={styles.rowStatus}>
                       <span style={{
                         ...styles.statusBadge,
                         backgroundColor: statusStyle.bg,
@@ -227,10 +299,20 @@ const MyOrders = () => {
                         {statusStyle.label}
                       </span>
                     </div>
-                    <div style={styles.orderMeta}>
-                      <span style={styles.orderDate}>
-                        {new Date(order.createdAt).toLocaleDateString()}
-                      </span>
+                    
+                    <div style={styles.rowDate}>
+                      <div>{new Date(order.createdAt).toLocaleDateString()}</div>
+                      <div style={styles.timeText}>{new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                    </div>
+                    
+                    <div style={styles.rowActions} onClick={(e) => e.stopPropagation()}>
+                      <button 
+                        onClick={() => handleChatOpen(order)}
+                        style={styles.chatBtn}
+                      >
+                        💬
+                        {unreadCount > 0 && <span style={styles.unreadDot}></span>}
+                      </button>
                       <button 
                         onClick={() => toggleExpand(order._id)}
                         style={styles.expandBtn}
@@ -239,106 +321,62 @@ const MyOrders = () => {
                       </button>
                     </div>
                   </div>
-
-                  {/* Order Items Preview with Size */}
-                  <div style={styles.itemsPreview}>
-                    {firstProduct?.productId?.images?.[0] ? (
-                      <img 
-                        src={firstProduct.productId.images[0]} 
-                        alt="" 
-                        style={styles.itemThumb}
-                      />
-                    ) : (
-                      <div style={styles.itemThumbPlaceholder}>📦</div>
-                    )}
-                    <div style={styles.itemDetails}>
-                      <div style={styles.itemTitle}>
-                        {firstProduct?.productId?.title || 'Product'}
-                        {moreItems > 0 && (
-                          <span style={styles.moreItems}> +{moreItems} more</span>
-                        )}
-                      </div>
-                      <div style={styles.itemMeta}>
-                        {firstProductSize && (
-                          <span style={styles.sizeBadge}>Size: {firstProductSize}</span>
-                        )}
-                        <span>Qty: {firstProduct?.quantity || 0}</span>
-                        <span style={styles.itemPrice}>{formatPrice(order.totalAmount)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div style={styles.actionButtons}>
-                    <button 
-                      onClick={() => handleChatOpen(order)}
-                      style={styles.chatBtn}
-                      disabled={!sellerId}
-                    >
-                      💬 Message Seller
-                      {unreadCount > 0 && <span style={styles.unreadDot}></span>}
-                    </button>
-                    {order.status !== 'cancelled' && order.status !== 'delivered' && (
-                      <button 
-                        onClick={() => toggleExpand(order._id)}
-                        style={styles.detailsBtn}
-                      >
-                        View Details
-                      </button>
-                    )}
-                  </div>
-
+                  
                   {/* Expanded Details */}
                   {isExpanded && (
-                    <div style={styles.expandedContent}>
-                      {/* All Products with Sizes */}
+                    <div style={styles.expandedRow}>
+                      {/* Delivery Info */}
+                      <div style={styles.expandedSection}>
+                        <h4 style={styles.sectionTitle}>Delivery Information</h4>
+                        <div style={styles.deliveryGrid}>
+                          <div><strong>Address:</strong> {order.deliveryAddress}</div>
+                          <div><strong>Phone:</strong> {order.contactNumber}</div>
+                          <div><strong>Customer:</strong> {order.buyerId?.name}</div>
+                          <div><strong>Email:</strong> {order.buyerId?.email || 'N/A'}</div>
+                        </div>
+                      </div>
+                      
+                      {/* Products List */}
                       <div style={styles.expandedSection}>
                         <h4 style={styles.sectionTitle}>Order Items</h4>
-                        <div style={styles.productsList}>
+                        <div style={styles.productsTable}>
+                          <div style={styles.productsHeader}>
+                            <div style={{ flex: 2 }}>Product</div>
+                            <div style={{ flex: 0.5, textAlign: 'center' }}>Size</div>
+                            <div style={{ flex: 0.5, textAlign: 'center' }}>Qty</div>
+                            <div style={{ flex: 0.8, textAlign: 'center' }}>Price</div>
+                            <div style={{ flex: 0.8, textAlign: 'right' }}>Total</div>
+                          </div>
                           {order.products.map((item, idx) => {
-                            const itemSize = item.size && item.size !== 'null' ? item.size : null;
+                            const selectedSize = item.size;
+                            const hasSize = selectedSize && selectedSize !== 'null' && selectedSize !== '';
                             return (
-                              <div key={idx} style={styles.productItem}>
-                                <div style={styles.productImageWrapper}>
+                              <div key={idx} style={styles.productsRow}>
+                                <div style={{ flex: 2, display: 'flex', alignItems: 'center', gap: '12px' }}>
                                   {item.productId?.images?.[0] ? (
                                     <img src={item.productId.images[0]} alt="" style={styles.productThumb} />
                                   ) : (
                                     <div style={styles.productThumbPlaceholder}>📦</div>
                                   )}
+                                  <span>{item.productId?.title || 'Product'}</span>
                                 </div>
-                                <div style={styles.productInfo}>
-                                  <div style={styles.productName}>{item.productId?.title || 'Product'}</div>
-                                  <div style={styles.productMeta}>
-                                    {itemSize && (
-                                      <span style={styles.productSizeBadge}>📏 Size: {itemSize}</span>
-                                    )}
-                                    <span>🔢 Qty: {item.quantity}</span>
-                                    <span>💰 {formatPrice(item.price)} each</span>
-                                  </div>
+                                <div style={{ flex: 0.5, textAlign: 'center' }}>
+                                  {hasSize ? selectedSize : '—'}
                                 </div>
-                                <div style={styles.productTotal}>
-                                  {formatPrice(item.price * item.quantity)}
-                                </div>
+                                <div style={{ flex: 0.5, textAlign: 'center' }}>{item.quantity}</div>
+                                <div style={{ flex: 0.8, textAlign: 'center' }}>{formatPrice(item.price)}</div>
+                                <div style={{ flex: 0.8, textAlign: 'right', fontWeight: 500 }}>{formatPrice(item.price * item.quantity)}</div>
                               </div>
                             );
                           })}
                         </div>
                       </div>
-
-                      {/* Delivery Info */}
-                      <div style={styles.expandedSection}>
-                        <h4 style={styles.sectionTitle}>Delivery Information</h4>
-                        <div style={styles.deliveryGrid}>
-                          <div><strong>📍 Address:</strong> {order.deliveryAddress}</div>
-                          <div><strong>📞 Contact:</strong> {order.contactNumber}</div>
-                        </div>
-                      </div>
-
+                      
                       {/* Order Summary */}
                       <div style={styles.summaryBox}>
                         <div style={styles.summaryRow}>
                           <span>Subtotal</span>
-                          <span>{formatPrice(order.originalAmount || order.totalAmount)}</span>
+                          <span>{formatPrice(order.originalAmount || order.totalAmount || 0)}</span>
                         </div>
                         {order.couponDiscount > 0 && (
                           <div style={styles.summaryRow}>
@@ -352,32 +390,31 @@ const MyOrders = () => {
                         </div>
                         <div style={styles.summaryDivider}></div>
                         <div style={styles.summaryTotal}>
-                          <span>Total Paid</span>
+                          <span>Total</span>
                           <strong style={styles.totalAmountLarge}>{formatPrice(order.totalAmount)}</strong>
                         </div>
                       </div>
-
+                      
                       {/* Order Tracker */}
                       <OrderTracker 
                         order={order} 
                         onStatusUpdate={fetchOrders}
-                        userRole="buyer"
+                        userRole="seller"
                       />
                     </div>
                   )}
-                </div>
+                </React.Fragment>
               );
             })}
           </div>
         )}
       </div>
       
-      {/* Chat Box */}
       {chatOrder && (
         <ChatBox
           orderId={chatOrder._id}
-          sellerId={getSellerIdFromOrder(chatOrder)}
-          buyerId={user?._id}
+          sellerId={user?._id}
+          buyerId={getBuyerIdFromOrder(chatOrder)}
           currentUserId={user?._id}
           isOpen={!!chatOrder}
           onClose={() => {
@@ -392,9 +429,9 @@ const MyOrders = () => {
 
 const styles = {
   container: {
-    maxWidth: '900px',
+    maxWidth: '1280px',
     margin: '0 auto',
-    padding: '32px 20px',
+    padding: '32px 24px',
     minHeight: '100vh',
     backgroundColor: '#f9fafb',
   },
@@ -453,32 +490,37 @@ const styles = {
   statsGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(6, 1fr)',
-    gap: '10px',
+    gap: '12px',
     marginBottom: '28px',
   },
   statCard: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    padding: '14px 8px',
+    padding: '16px 12px',
     backgroundColor: '#fff',
-    borderRadius: '14px',
+    borderRadius: '16px',
     borderTop: '3px solid',
     boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
   },
   statNumber: {
-    fontSize: '24px',
+    fontSize: '28px',
     fontWeight: '700',
     color: '#111827',
     lineHeight: 1.2,
   },
   statLabel: {
-    fontSize: '11px',
+    fontSize: '12px',
     color: '#6b7280',
     marginTop: '4px',
   },
   
   filterBar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '16px',
     marginBottom: '24px',
   },
   filterTabs: {
@@ -509,57 +551,185 @@ const styles = {
     fontSize: '11px',
     backgroundColor: 'rgba(0,0,0,0.1)',
   },
-  
-  ordersList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
+  searchWrapper: {
+    position: 'relative',
+    minWidth: '280px',
   },
-  orderCard: {
+  searchInput: {
+    width: '100%',
+    padding: '10px 36px 10px 16px',
+    border: '1px solid #e5e7eb',
+    borderRadius: '40px',
+    fontSize: '13px',
+    outline: 'none',
+    backgroundColor: '#fff',
+    transition: 'all 0.2s',
+  },
+  clearSearch: {
+    position: 'absolute',
+    right: '12px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '18px',
+    color: '#9ca3af',
+  },
+  
+  ordersTable: {
     backgroundColor: '#fff',
     borderRadius: '20px',
     overflow: 'hidden',
     boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
     border: '1px solid #f0f0f0',
   },
-  orderHeader: {
+  tableHeader: {
     display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     padding: '16px 20px',
     backgroundColor: '#fafbfc',
     borderBottom: '1px solid #f0f0f0',
+    fontSize: '12px',
+    fontWeight: '600',
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: '0.3px',
   },
-  orderInfo: {
+  tableRow: {
+    display: 'flex',
+    padding: '16px 20px',
+    borderBottom: '1px solid #f5f5f5',
+    cursor: 'pointer',
+    transition: 'background 0.2s',
+  },
+  
+  headerOrder: { width: '100px', flexShrink: 0 },
+  headerCustomer: { width: '200px', flexShrink: 0 },
+  headerItems: { flex: 1, minWidth: '200px' },
+  headerTotal: { width: '110px', flexShrink: 0, textAlign: 'right' },
+  headerStatus: { width: '130px', flexShrink: 0 },
+  headerDate: { width: '120px', flexShrink: 0 },
+  headerActions: { width: '70px', flexShrink: 0, textAlign: 'right' },
+  
+  rowOrder: { width: '100px', flexShrink: 0 },
+  rowCustomer: { width: '200px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '12px' },
+  rowItems: { flex: 1, minWidth: '200px' },
+  rowTotal: { width: '110px', flexShrink: 0, textAlign: 'right' },
+  rowStatus: { width: '130px', flexShrink: 0 },
+  rowDate: { width: '120px', flexShrink: 0, fontSize: '12px', color: '#6b7280' },
+  rowActions: { width: '70px', flexShrink: 0, textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' },
+  
+  orderId: {
+    fontFamily: 'monospace',
+    fontSize: '13px',
+    fontWeight: '500',
+    color: '#d97706',
+  },
+  
+  customerAvatar: {
+    width: '36px',
+    height: '36px',
+    borderRadius: '50%',
+    backgroundColor: '#f3f4f6',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#4b5563',
+    fontWeight: '500',
+    fontSize: '14px',
+  },
+  customerInfo: {
+    flex: 1,
+  },
+  customerName: {
+    fontSize: '14px',
+    fontWeight: '500',
+    color: '#111827',
+  },
+  customerContact: {
+    fontSize: '11px',
+    color: '#9ca3af',
+  },
+  
+  itemsPreview: {
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
   },
-  orderId: {
-    fontFamily: 'monospace',
-    fontSize: '13px',
-    fontWeight: '600',
-    color: '#d97706',
+  itemThumb: {
+    width: '44px',
+    height: '44px',
+    borderRadius: '10px',
+    objectFit: 'cover',
+    backgroundColor: '#f9fafb',
   },
+  itemThumbPlaceholder: {
+    width: '44px',
+    height: '44px',
+    borderRadius: '10px',
+    backgroundColor: '#f3f4f6',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '20px',
+  },
+  itemInfo: {
+    flex: 1,
+  },
+  itemTitle: {
+    fontSize: '13px',
+    fontWeight: '500',
+    color: '#111827',
+    marginBottom: '2px',
+  },
+  moreItems: {
+    fontSize: '11px',
+    color: '#9ca3af',
+  },
+  
+  totalAmount: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#111827',
+  },
+  
   statusBadge: {
     display: 'inline-block',
-    padding: '4px 12px',
+    padding: '5px 14px',
     borderRadius: '30px',
     fontSize: '12px',
     fontWeight: '500',
   },
-  orderMeta: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
+  
+  timeText: {
+    fontSize: '11px',
+    color: '#9ca3af',
+    marginTop: '2px',
   },
-  orderDate: {
-    fontSize: '12px',
-    color: '#6b7280',
+  
+  chatBtn: {
+    position: 'relative',
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    backgroundColor: '#f3f4f6',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '14px',
+    transition: 'all 0.2s',
+  },
+  unreadDot: {
+    position: 'absolute',
+    top: '2px',
+    right: '4px',
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    backgroundColor: '#dc2626',
   },
   expandBtn: {
-    width: '28px',
-    height: '28px',
+    width: '32px',
+    height: '32px',
     borderRadius: '50%',
     backgroundColor: '#f3f4f6',
     border: 'none',
@@ -570,107 +740,10 @@ const styles = {
     transition: 'all 0.2s',
   },
   
-  itemsPreview: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-    padding: '16px 20px',
-    borderBottom: '1px solid #f5f5f5',
-  },
-  itemThumb: {
-    width: '56px',
-    height: '56px',
-    borderRadius: '12px',
-    objectFit: 'cover',
-    backgroundColor: '#f9fafb',
-  },
-  itemThumbPlaceholder: {
-    width: '56px',
-    height: '56px',
-    borderRadius: '12px',
-    backgroundColor: '#f3f4f6',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '24px',
-  },
-  itemDetails: {
-    flex: 1,
-  },
-  itemTitle: {
-    fontSize: '15px',
-    fontWeight: '500',
-    color: '#111827',
-    marginBottom: '4px',
-  },
-  moreItems: {
-    fontSize: '12px',
-    fontWeight: 'normal',
-    color: '#6b7280',
-  },
-  itemMeta: {
-    display: 'flex',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: '12px',
-    fontSize: '12px',
-    color: '#6b7280',
-  },
-  sizeBadge: {
-    backgroundColor: '#fef3c7',
-    color: '#d97706',
-    padding: '2px 8px',
-    borderRadius: '20px',
-    fontSize: '11px',
-    fontWeight: '500',
-  },
-  itemPrice: {
-    fontWeight: '600',
-    color: '#d97706',
-  },
-  
-  actionButtons: {
-    display: 'flex',
-    gap: '12px',
-    padding: '12px 20px 16px 20px',
-  },
-  chatBtn: {
-    position: 'relative',
-    padding: '8px 18px',
-    borderRadius: '40px',
-    backgroundColor: '#f3f4f6',
-    border: 'none',
-    cursor: 'pointer',
-    fontSize: '13px',
-    fontWeight: '500',
-    color: '#4b5563',
-    transition: 'all 0.2s',
-  },
-  unreadDot: {
-    position: 'absolute',
-    top: '4px',
-    right: '8px',
-    width: '8px',
-    height: '8px',
-    borderRadius: '50%',
-    backgroundColor: '#dc2626',
-  },
-  detailsBtn: {
-    padding: '8px 18px',
-    borderRadius: '40px',
-    backgroundColor: '#fff',
-    border: '1px solid #e5e7eb',
-    cursor: 'pointer',
-    fontSize: '13px',
-    fontWeight: '500',
-    color: '#4b5563',
-    transition: 'all 0.2s',
-  },
-  
-  expandedContent: {
-    padding: '20px 24px',
+  expandedRow: {
+    padding: '24px 28px',
     backgroundColor: '#fafbfc',
-    borderTop: '1px solid #f0f0f0',
+    borderBottom: '1px solid #f0f0f0',
   },
   expandedSection: {
     marginBottom: '24px',
@@ -683,86 +756,59 @@ const styles = {
     paddingBottom: '8px',
     borderBottom: '1px solid #e5e7eb',
   },
-  
-  productsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  productItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '14px',
-    padding: '12px',
-    backgroundColor: '#fff',
-    borderRadius: '12px',
-    border: '1px solid #f0f0f0',
-  },
-  productImageWrapper: {
-    width: '52px',
-    height: '52px',
-    flexShrink: 0,
-  },
-  productThumb: {
-    width: '100%',
-    height: '100%',
-    borderRadius: '10px',
-    objectFit: 'cover',
-  },
-  productThumbPlaceholder: {
-    width: '100%',
-    height: '100%',
-    borderRadius: '10px',
-    backgroundColor: '#f3f4f6',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '20px',
-  },
-  productInfo: {
-    flex: 1,
-  },
-  productName: {
-    fontSize: '14px',
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: '6px',
-  },
-  productMeta: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '12px',
-    fontSize: '12px',
-    color: '#6b7280',
-  },
-  productSizeBadge: {
-    backgroundColor: '#fef3c7',
-    color: '#d97706',
-    padding: '2px 8px',
-    borderRadius: '16px',
-    fontSize: '11px',
-    fontWeight: '500',
-  },
-  productTotal: {
-    fontSize: '15px',
-    fontWeight: '600',
-    color: '#d97706',
-  },
-  
   deliveryGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
     gap: '12px',
     fontSize: '13px',
     color: '#4b5563',
-    padding: '4px 0',
+  },
+  
+  productsTable: {
+    border: '1px solid #e5e7eb',
+    borderRadius: '12px',
+    overflow: 'hidden',
+  },
+  productsHeader: {
+    display: 'flex',
+    padding: '12px 16px',
+    backgroundColor: '#f9fafb',
+    fontSize: '11px',
+    fontWeight: '600',
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: '0.3px',
+    borderBottom: '1px solid #e5e7eb',
+  },
+  productsRow: {
+    display: 'flex',
+    padding: '12px 16px',
+    borderBottom: '1px solid #f0f0f0',
+    fontSize: '13px',
+    alignItems: 'center',
+  },
+  productThumb: {
+    width: '32px',
+    height: '32px',
+    borderRadius: '8px',
+    objectFit: 'cover',
+  },
+  productThumbPlaceholder: {
+    width: '32px',
+    height: '32px',
+    borderRadius: '8px',
+    backgroundColor: '#f3f4f6',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '14px',
   },
   
   summaryBox: {
     marginTop: '20px',
     padding: '16px 20px',
     backgroundColor: '#fff',
-    borderRadius: '14px',
+    borderRadius: '12px',
     border: '1px solid #e5e7eb',
     maxWidth: '300px',
     marginLeft: 'auto',
@@ -770,7 +816,7 @@ const styles = {
   summaryRow: {
     display: 'flex',
     justifyContent: 'space-between',
-    padding: '6px 0',
+    padding: '8px 0',
     fontSize: '13px',
     color: '#6b7280',
   },
@@ -783,7 +829,7 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: '6px',
+    paddingTop: '8px',
     fontSize: '15px',
     fontWeight: '600',
   },
@@ -803,18 +849,6 @@ const styles = {
     marginBottom: '16px',
     opacity: 0.5,
   },
-  shopBtn: {
-    marginTop: '20px',
-    padding: '10px 28px',
-    backgroundColor: '#111827',
-    color: '#fff',
-    border: 'none',
-    borderRadius: '40px',
-    fontSize: '14px',
-    fontWeight: '500',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  },
 };
 
 const styleSheet = document.createElement('style');
@@ -823,11 +857,7 @@ styleSheet.textContent = `
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
   }
-  button:hover {
-    opacity: 0.9;
-    transform: translateY(-1px);
-  }
 `;
 document.head.appendChild(styleSheet);
 
-export default MyOrders;
+export default SellerOrders;

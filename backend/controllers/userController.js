@@ -5,8 +5,15 @@ const becomeSeller = async (req, res) => {
     const { businessName, businessDescription, businessCategory, phoneNumber } = req.body;
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    // Check if user is already suspended
+    if (user.sellerSuspended) {
+      return res.status(403).json({ message: 'Your account is suspended. Cannot become a seller.' });
+    }
+    
     user.isSeller = true;
     user.sellerApproved = false;
+    user.sellerSuspended = false;
     user.sellerDetails = { businessName, businessDescription, businessCategory, phoneNumber };
     await user.save();
     res.json({ message: 'Seller request submitted. Awaiting admin approval.', user });
@@ -17,8 +24,14 @@ const becomeSeller = async (req, res) => {
 
 const getSellerStatus = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('isSeller sellerApproved sellerDetails');
-    res.json({ isSeller: user.isSeller, sellerApproved: user.sellerApproved, sellerDetails: user.sellerDetails });
+    const user = await User.findById(req.user._id).select('isSeller sellerApproved sellerSuspended sellerDetails suspensionReason');
+    res.json({ 
+      isSeller: user.isSeller, 
+      sellerApproved: user.sellerApproved,
+      sellerSuspended: user.sellerSuspended || false,
+      suspensionReason: user.suspensionReason || '',
+      sellerDetails: user.sellerDetails 
+    });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -27,7 +40,20 @@ const getSellerStatus = async (req, res) => {
 const getMyProducts = async (req, res) => {
   try {
     const Product = await import('../models/Product.js').then(m => m.default);
-    const products = await Product.find({ sellerId: req.user._id }).populate('category', 'name').sort({ createdAt: -1 });
+    
+    // Check if seller is suspended
+    const user = await User.findById(req.user._id);
+    if (user.sellerSuspended) {
+      return res.status(403).json({ 
+        message: 'Your account has been suspended. You cannot access your products.',
+        suspended: true,
+        reason: user.suspensionReason
+      });
+    }
+    
+    const products = await Product.find({ sellerId: req.user._id })
+      .populate('category', 'name')
+      .sort({ createdAt: -1 });
     res.json(products);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });

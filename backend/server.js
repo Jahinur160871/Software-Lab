@@ -1,46 +1,45 @@
-import express from 'express';
-import cors from 'cors';
-import cookieParser from 'cookie-parser';
-import dotenv from 'dotenv';
-import connectDB from './config/db.js';
-import authRoutes from './routes/authRoutes.js';
-import productRoutes from './routes/productRoutes.js';
-import orderRoutes from './routes/orderRoutes.js';
-import userRoutes from './routes/userRoutes.js';
-import adminRoutes from './routes/adminRoutes.js';
-import categoryRoutes from './routes/categoryRoutes.js';
-import couponRoutes from './routes/couponRoutes.js';
-import messageRoutes from './routes/messageRoutes.js';
-import User from './models/User.js';
-import Category from './models/Category.js';
-import bcrypt from 'bcryptjs';
+import { setServers } from "node:dns/promises";
+import express from "express";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import dotenv from "dotenv";
+import connectDB from "./config/db.js";
+import authRoutes from "./routes/authRoutes.js";
+import productRoutes from "./routes/productRoutes.js";
+import orderRoutes from "./routes/orderRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
+import categoryRoutes from "./routes/categoryRoutes.js";
+import User from "./models/User.js";
+import Category from "./models/Category.js";
+import bcrypt from "bcryptjs";
+
+setServers(["1.1.1.1", "8.8.8.8"]);
 
 dotenv.config();
 connectDB();
 
 const app = express();
 
-app.use(cors({
-  origin: 'http://localhost:5173',
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+  }),
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/categories', categoryRoutes);
-app.use('/api/coupons', couponRoutes);
-// Add after other routes
-app.use('/api/messages', messageRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/categories", categoryRoutes);
 
-app.get('/', (req, res) => {
-  res.json({ message: 'CampusMart API is running' });
+app.get("/", (req, res) => {
+  res.json({ message: "CampusMart API is running with Cookie Authentication" });
 });
 
 // Seed initial data - Only categories and admin (no sample products)
@@ -53,6 +52,13 @@ const seedInitialData = async () => {
       { name: 'Used Materials', slug: 'used-materials', icon: '📦', parentCategory: null, subcategories: ['Lab Equipment', 'Textbook', 'Electronics', 'Furniture'] },
       { name: 'Lab Equipment', slug: 'lab-equipment', icon: '🔬', parentCategory: 'Used Materials', subcategories: ['Physics', 'Chemistry', 'Biology', 'Engineering'] },
       { name: 'Textbook', slug: 'textbook', icon: '📖', parentCategory: 'Used Materials', subcategories: ['Computer Science', 'Engineering', 'Business', 'Science'] }
+      { name: "Food", slug: "food", icon: "🍔" },
+      { name: "Clothing", slug: "clothing", icon: "👕" },
+      { name: "Stylish Products", slug: "stylish-products", icon: "💎" },
+      { name: "Lab Equipment", slug: "lab-equipment", icon: "🔬" },
+      { name: "Used Items", slug: "used-items", icon: "📚" },
+      { name: "Electronics", slug: "electronics", icon: "💻" },
+      { name: "Textbooks", slug: "textbooks", icon: "📖" },
     ];
 
     for (const cat of categories) {
@@ -78,10 +84,10 @@ const seedInitialData = async () => {
         name: 'Admin User',
         email: adminEmail,
         password: hashedPassword,
-        role: 'staff',
+        role: "staff",
         isSeller: true,
         sellerApproved: true,
-        emailVerified: true
+        emailVerified: true,
       });
       
       console.log('✅ Admin user created successfully!');
